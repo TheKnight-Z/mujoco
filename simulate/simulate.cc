@@ -464,7 +464,7 @@ void InitializeSensor(mj::Simulate* sim) {
   // title
   mju::strcpy_arr(figsensor.title, "Sensor data");
 
-  // y-tick nubmer format
+  // y-tick number format
   mju::strcpy_arr(figsensor.yformat, "%.1f");
 
   // grid size
@@ -544,6 +544,16 @@ void ShowSensor(mj::Simulate* sim, mjrRect rect) {
 
 void ShowFigure(mj::Simulate* sim, mjrRect viewport, mjvFigure* fig){
   mjr_figure(viewport, fig, &sim->platform_ui->mjr_context());
+}
+
+void ShowOverlayText(mj::Simulate* sim, mjrRect viewport, int font, int gridpos,
+                     std::string text1, std::string text2) {
+  mjr_overlay(font, gridpos, viewport, text1.c_str(), text2.c_str(),
+              &sim->platform_ui->mjr_context());
+}
+
+void ShowImage(mj::Simulate* sim, mjrRect viewport, const unsigned char* image) {
+  mjr_drawPixels(image, nullptr, viewport, &sim->platform_ui->mjr_context());
 }
 
 // load state from history buffer
@@ -1141,17 +1151,74 @@ void AlignAndScaleView(mj::Simulate* sim, const mjModel* m) {
 }
 
 
-// copy qpos to clipboard as key
-void CopyPose(mj::Simulate* sim, const mjModel* m, const mjData* d) {
-  char clipboard[5000] = "<key qpos='";
+// copy state to clipboard as key
+void CopyKey(mj::Simulate* sim, const mjModel* m, const mjData* d, bool fp) {
+  char clipboard[5000] = "<key\n";
   char buf[200];
+  const char p_regular[] = "%g";
+  const char p_full[] = "%-22.16g";
+  const char* format = fp ? p_full : p_regular;
 
-  // prepare string
-  for (int i=0; i<m->nq; i++) {
-    mju::sprintf_arr(buf, i==m->nq-1 ? "%g" : "%g ", d->qpos[i]);
+  // time
+  mju::strcat_arr(clipboard, "  time=\"");
+  mju::sprintf_arr(buf, format, d->time);
+  mju::strcat_arr(clipboard, buf);
+
+  // qpos
+  mju::strcat_arr(clipboard, "\"\n  qpos=\"");
+  for (int i = 0; i < m->nq; i++) {
+    mju::sprintf_arr(buf, format, d->qpos[i]);
+    if (i < m->nq-1) mju::strcat_arr(buf, " ");
     mju::strcat_arr(clipboard, buf);
   }
-  mju::strcat_arr(clipboard, "'/>");
+
+  // qvel
+  mju::strcat_arr(clipboard, "\"\n  qvel=\"");
+  for (int i = 0; i < m->nv; i++) {
+    mju::sprintf_arr(buf, format, d->qvel[i]);
+    if (i < m->nv-1) mju::strcat_arr(buf, " ");
+    mju::strcat_arr(clipboard, buf);
+  }
+
+  // act
+  if (m->na > 0) {
+    mju::strcat_arr(clipboard, "\"\n  act=\"");
+    for (int i = 0; i < m->na; i++) {
+      mju::sprintf_arr(buf, format, d->act[i]);
+      if (i < m->na-1) mju::strcat_arr(buf, " ");
+      mju::strcat_arr(clipboard, buf);
+    }
+  }
+
+  // ctrl
+  if (m->nu > 0) {
+    mju::strcat_arr(clipboard, "\"\n  ctrl=\"");
+    for (int i = 0; i < m->nu; i++) {
+      mju::sprintf_arr(buf, format, d->ctrl[i]);
+      if (i < m->nu-1) mju::strcat_arr(buf, " ");
+      mju::strcat_arr(clipboard, buf);
+    }
+  }
+
+  if (m->nmocap > 0) {
+    // mocap_pos
+    mju::strcat_arr(clipboard, "\"\n  mpos=\"");
+    for (int i = 0; i < 3*m->nmocap; i++) {
+      mju::sprintf_arr(buf, format, d->mocap_pos[i]);
+      if (i < 3*m->nmocap-1) mju::strcat_arr(buf, " ");
+      mju::strcat_arr(clipboard, buf);
+    }
+
+    // mocap_quat
+    mju::strcat_arr(clipboard, "\"\n  mquat=\"");
+    for (int i = 0; i < 4*m->nmocap; i++) {
+      mju::sprintf_arr(buf, format, d->mocap_quat[i]);
+      if (i < 4*m->nmocap-1) mju::strcat_arr(buf, " ");
+      mju::strcat_arr(clipboard, buf);
+    }
+  }
+
+  mju::strcat_arr(clipboard, "\"\n/>");
 
   // copy to clipboard
   sim->platform_ui->SetClipboardString(clipboard);
@@ -1412,8 +1479,9 @@ void UiEvent(mjuiState* state) {
         sim->pending_.align = true;
         break;
 
-      case 4:             // Copy pose
-        sim->pending_.copy_pose = true;
+      case 4:             // Copy key
+        sim->pending_.copy_key = true;
+        sim->pending_.copy_key_full_precision = sim->platform_ui->IsShiftKeyPressed();
         break;
 
       case 5:             // Adjust key
@@ -1967,9 +2035,10 @@ void Simulate::Sync() {
     pending_.align = false;
   }
 
-  if (pending_.copy_pose) {
-    CopyPose(this, m_, d_);
-    pending_.copy_pose = false;
+  if (pending_.copy_key) {
+    CopyKey(this, m_, d_, pending_.copy_key_full_precision);
+    pending_.copy_key = false;
+    pending_.copy_key_full_precision = false;
   }
 
   if (pending_.load_from_history) {
@@ -2595,6 +2664,16 @@ void Simulate::Render() {
   // user figures
   for (auto& [viewport, figure] : this->user_figures_) {
     ShowFigure(this, viewport, &figure);
+  }
+
+  // overlay text
+  for (auto& [font, gridpos, text1, text2] : this->user_texts_) {
+    ShowOverlayText(this, rect, font, gridpos, text1, text2);
+  }
+
+  // user images
+  for (auto& [viewport, image] : this->user_images_) {
+    ShowImage(this, viewport, image);
   }
 
   // finalize

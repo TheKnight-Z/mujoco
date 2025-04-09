@@ -773,6 +773,9 @@ void mjCBase::SetFrame(mjCFrame* _frame) {
   if (!_frame) {
     return;
   }
+  if (_frame->body && GetParent() != _frame->body) {
+    throw mjCError(this, "Frame and body '%s' have mismatched parents", name.c_str());
+  }
   frame = _frame;
 }
 
@@ -815,6 +818,7 @@ mjCBody::mjCBody(mjCModel* _model) {
   mjuu_zerovec(xpos0, 3);
   mjuu_setvec(xquat0, 1, 0, 0, 0);
   last_attached = nullptr;
+  mocapid = -1;
 
   // clear object lists
   bodies.clear();
@@ -837,7 +841,6 @@ mjCBody::mjCBody(mjCModel* _model) {
 
 mjCBody::mjCBody(const mjCBody& other, mjCModel* _model) {
   model = _model;
-  uid = model->GetUid();
   mjSpec* origin = model->FindSpec(other.compiler);
   compiler = origin ? &origin->compiler : &model->spec.compiler;
   *this = other;
@@ -891,8 +894,18 @@ mjCBody& mjCBody::operator+=(const mjCBody& other) {
   for (int i=0; i < other.bodies.size(); i++) {
     bodies.push_back(new mjCBody(*other.bodies[i], model));  // triggers recursive call
     bodies.back()->parent = this;
-    bodies.back()->frame =
-      other.bodies[i]->frame ? frames[fmap[other.bodies[i]->frame]] : nullptr;
+    bodies.back()->frame = nullptr;
+    if (other.bodies[i]->frame) {
+      if (fmap.find(other.bodies[i]->frame) != fmap.end()) {
+        bodies.back()->frame = frames[fmap[other.bodies[i]->frame]];
+      } else {
+        throw mjCError(this, "Frame '%s' not found in other body",
+                       other.bodies[i]->frame->name.c_str());
+      }
+      if (bodies.back()->frame && bodies.back()->frame->body != this) {
+        throw mjCError(this, "Frame and body '%s' have mismatched parents", name.c_str());
+      }
+    }
   }
 
   return *this;
@@ -903,8 +916,8 @@ mjCBody& mjCBody::operator+=(const mjCBody& other) {
 // attach frame to body
 mjCBody& mjCBody::operator+=(const mjCFrame& other) {
   // append a copy of the attached spec
-  if (other.model != model && !model->FindSpec(mjs_getString(other.model->spec.modelname))) {
-    model->AppendSpec(mj_copySpec(&other.model->spec));
+  if (other.model != model && !model->FindSpec(&other.model->spec.compiler)) {
+    model->AppendSpec(mj_copySpec(&other.model->spec), &other.model->spec.compiler);
   }
 
   // create a copy of the subtree that contains the frame
@@ -931,7 +944,6 @@ mjCBody& mjCBody::operator+=(const mjCFrame& other) {
   frames.back()->frame = other.frame;
   if (model->deepcopy_) {
     frames.back()->NameSpace(other_model);
-    frames.back()->uid = model->GetUid();
   } else {
     frames.back()->AddRef();
   }
@@ -1024,8 +1036,6 @@ void mjCBody::CopyList(std::vector<T*>& dst, const std::vector<T*>& src,
     // increment refcount if shallow copy is made
     if (!model->deepcopy_) {
       dst.back()->AddRef();
-    } else {
-      dst.back()->uid = model->GetUid();
     }
 
     // set namespace
@@ -1243,7 +1253,6 @@ mjCBody* mjCBody::AddBody(mjCDef* _def) {
   obj->parent = this;
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1258,7 +1267,6 @@ mjCFrame* mjCBody::AddFrame(mjCFrame* _frame) {
   model->MakeTreeLists();
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1282,7 +1290,6 @@ mjCJoint* mjCBody::AddFreeJoint() {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1305,7 +1312,6 @@ mjCJoint* mjCBody::AddJoint(mjCDef* _def) {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1328,7 +1334,6 @@ mjCGeom* mjCBody::AddGeom(mjCDef* _def) {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1351,7 +1356,6 @@ mjCSite* mjCBody::AddSite(mjCDef* _def) {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1374,7 +1378,6 @@ mjCCamera* mjCBody::AddCamera(mjCDef* _def) {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1397,7 +1400,6 @@ mjCLight* mjCBody::AddLight(mjCDef* _def) {
 
 
   // update signature
-  obj->uid = model->GetUid();
   model->spec.element->signature = model->Signature();
   return obj;
 }
@@ -1963,16 +1965,6 @@ void mjCBody::Compile(void) {
     }
   }
 
-  // if discarding visual geoms, use explicit inertias
-  if (compiler->discardvisual) {
-    for (int j=0; j < geoms.size(); j++) {
-      if (geoms[j]->IsVisual()) {
-        explicitinertial = true;
-        break;
-      }
-    }
-  }
-
   // free joint alignment, phase 2 (transform sites, cameras and lights)
   if (align_free) {
     // frames have already been compiled and applied to children
@@ -2037,8 +2029,8 @@ mjCFrame& mjCFrame::operator=(const mjCFrame& other) {
 // attach body to frame
 mjCFrame& mjCFrame::operator+=(const mjCBody& other) {
   // append a copy of the attached spec
-  if (other.model != model && !model->FindSpec(mjs_getString(other.model->spec.modelname))) {
-    model->AppendSpec(mj_copySpec(&other.model->spec));
+  if (other.model != model && !model->FindSpec(&other.model->spec.compiler)) {
+    model->AppendSpec(mj_copySpec(&other.model->spec), &other.model->spec.compiler);
   }
 
   // apply namespace and store keyframes in the source model
@@ -5396,7 +5388,9 @@ mjCTendon& mjCTendon::operator=(const mjCTendon& other) {
 bool mjCTendon::is_limited() const {
   return islimited(limited, range);
 }
-
+bool mjCTendon::is_actfrclimited() const {
+  return islimited(actfrclimited, actfrcrange);
+}
 
 void mjCTendon::PointToLocal() {
   spec.element = static_cast<mjsElement*>(this);
@@ -5613,6 +5607,12 @@ void mjCTendon::Compile(void) {
 
     // spatial path
     else {
+      if (armature < 0) {
+        throw mjCError(this,
+                       "tendon '%s' (id = %d): tendon armature cannot be negative",
+                        name.c_str(), id);
+      }
+
       switch (path[i]->type) {
         case mjWRAP_PULLEY:
           // pulley should not follow other pulley
@@ -5654,6 +5654,12 @@ void mjCTendon::Compile(void) {
                            name.c_str(), id, i);
           }
 
+          if (armature > 0) {
+            throw mjCError(this,
+                           "tendon '%s' (id = %d): geom wrapping not supported by tendon armature",
+                           name.c_str(), id);
+          }
+
           // mark geoms as non visual
           model->Geoms()[path[i]->obj->id]->SetNotVisual();
           break;
@@ -5680,6 +5686,21 @@ void mjCTendon::Compile(void) {
   // check limits
   if (range[0] >= range[1] && is_limited()) {
     throw mjCError(this, "invalid limits in tendon");
+  }
+
+  // if limited is auto, set to 1 if range is specified, otherwise unlimited
+  if (actfrclimited == mjLIMITED_AUTO) {
+    bool hasactfrcrange = !(actfrcrange[0] == 0 && actfrcrange[1] == 0);
+    checklimited(this, compiler->autolimits, "tendon", "", actfrclimited,
+                 hasactfrcrange);
+  }
+
+  // check actfrclimits
+  if (actfrcrange[0] >= actfrcrange[1] && is_actfrclimited()) {
+    throw mjCError(this, "invalid actuatorfrcrange in tendon");
+  }
+  if ((actfrcrange[0] > 0 || actfrcrange[1] < 0) && is_actfrclimited()) {
+    throw mjCError(this, "invalid actuatorfrcrange in tendon");
   }
 
   // check springlength
@@ -6474,6 +6495,18 @@ void mjCSensor::Compile(void) {
         needstage = mjSTAGE_ACC;
       }
       break;
+
+  case mjSENS_TENDONACTFRC:
+    // must be attached to tendon
+    if (objtype != mjOBJ_TENDON) {
+      throw mjCError(this, "sensor must be attached to tendon");
+    }
+
+    // set
+    dim = 1;
+    datatype = mjDATATYPE_REAL;
+    needstage = mjSTAGE_ACC;
+    break;
 
     case mjSENS_TENDONPOS:
     case mjSENS_TENDONVEL:

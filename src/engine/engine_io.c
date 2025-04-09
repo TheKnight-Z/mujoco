@@ -2079,6 +2079,7 @@ static int sensorSize(mjtSensor sensor_type, int sensor_dim) {
   case mjSENS_ACTUATORVEL:
   case mjSENS_ACTUATORFRC:
   case mjSENS_JOINTACTFRC:
+  case mjSENS_TENDONACTFRC:
   case mjSENS_JOINTLIMITPOS:
   case mjSENS_JOINTLIMITVEL:
   case mjSENS_JOINTLIMITFRC:
@@ -2143,6 +2144,7 @@ static int numObjects(const mjModel* m, mjtObj objtype) {
   case mjOBJ_DEFAULT:
   case mjOBJ_FRAME:
   case mjOBJ_UNKNOWN:
+  case mjOBJ_MODEL:
     return -1;
   case mjOBJ_BODY:
   case mjOBJ_XBODY:

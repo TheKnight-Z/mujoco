@@ -138,6 +138,7 @@ typedef struct mjsCompiler_ {      // compiler options
   mjtByte fusestatic;              // fuse static bodies with parent
   int inertiafromgeom;             // use geom inertias (mjtInertiaFromGeom)
   int inertiagrouprange[2];        // range of geom groups used to compute inertia
+  mjtByte saveinertial;            // save explicit inertial clause for all bodies to XML
   int alignfree;                   // align free joints with inertial frame
   mjLROpt LRopt;                   // options for lengthrange computation
 } mjsCompiler;
@@ -616,17 +617,20 @@ typedef struct mjsTendon_ {        // tendon specification
   mjsElement* element;             // element type
   mjString* name;                  // name
 
-  // stiffness, damping, friction
+  // stiffness, damping, friction, armature
   double stiffness;                // stiffness coefficient
   double springlength[2];          // spring resting length; {-1, -1}: use qpos_spring
   double damping;                  // damping coefficient
   double frictionloss;             // friction loss
   mjtNum solref_friction[mjNREF];  // solver reference: tendon friction
   mjtNum solimp_friction[mjNIMP];  // solver impedance: tendon friction
+  double armature;                 // inertia associated with tendon velocity
 
   // length range
   int limited;                     // does tendon have limits (mjtLimited)
+  int actfrclimited;               // does tendon have actuator force limits
   double range[2];                 // length limits
+  double actfrcrange[2];           // actuator force limits
   double margin;                   // margin value for tendon limit detection
   mjtNum solref_limit[mjNREF];     // solver reference: tendon limits
   mjtNum solimp_limit[mjNIMP];     // solver impedance: tendon limits

@@ -30,6 +30,7 @@
 #include <mujoco/mujoco.h>
 #include "errors.h"
 #include "indexers.h"  // IWYU pragma: keep
+#include "specs_wrapper.h"  // IWYU pragma: keep
 #include "raw.h"
 #include "structs.h"  // IWYU pragma: keep
 #include <pybind11/cast.h>
@@ -69,100 +70,6 @@ using MjDoubleRef6 = Eigen::Ref<const Eigen::Matrix<double, 6, 1>>;
 using MjDoubleRef10 = Eigen::Ref<const Eigen::Matrix<double, 10, 1>>;
 using MjDoubleRef11 = Eigen::Ref<const Eigen::Matrix<double, 11, 1>>;
 using MjDoubleRefVec = Eigen::Ref<const Eigen::VectorXd>;
-
-struct MjSpec {
-  MjSpec() : ptr(mj_makeSpec()) {}
-  MjSpec(raw::MjSpec* ptr, const py::dict& assets_ = {}) : ptr(ptr) {
-    for (const auto [key, value] : assets_) {
-      assets[key] = value;
-    }
-  }
-
-  // copy constructor and assignment
-  MjSpec(const MjSpec& other) : ptr(mj_copySpec(other.ptr)) {
-    override_assets = other.override_assets;
-    for (const auto [key, value] : other.assets) {
-      assets[key] = value;
-    }
-    parent = other.parent;
-  }
-  MjSpec& operator=(const MjSpec& other) {
-    override_assets = other.override_assets;
-    ptr = mj_copySpec(other.ptr);
-    for (const auto [key, value] : other.assets) {
-      assets[key] = value;
-    }
-    parent = other.parent;
-    return *this;
-  }
-
-  // move constructor and move assignment
-  MjSpec(MjSpec&& other) : ptr(other.ptr) {
-    override_assets = other.override_assets;
-    other.ptr = nullptr;
-    for (const auto [key, value] : other.assets) {
-      assets[key] = value;
-    }
-    other.assets.clear();
-    parent = other.parent;
-    other.parent = nullptr;
-  }
-  MjSpec& operator=(MjSpec&& other) {
-    override_assets = other.override_assets;
-    ptr = other.ptr;
-    other.ptr = nullptr;
-    for (const auto [key, value] : other.assets) {
-      assets[key] = value;
-    }
-    other.assets.clear();
-    parent = other.parent;
-    other.parent = nullptr;
-    return *this;
-  }
-
-  ~MjSpec() {
-    mj_deleteSpec(ptr);
-  }
-
-  raw::MjModel* Compile() {
-    if (assets.empty()) {
-      auto m = mj_compile(ptr, 0);
-      if (!m || mjs_isWarning(ptr)) {
-        throw py::value_error(mjs_getError(ptr));
-      }
-      return m;
-    }
-    mjVFS vfs;
-    mj_defaultVFS(&vfs);
-    for (const auto& asset : assets) {
-      std::string buffer_name =
-          _impl::StripPath(py::cast<std::string>(asset.first).c_str());
-      std::string buffer = py::cast<std::string>(asset.second);
-      const int vfs_error = InterceptMjErrors(mj_addBufferVFS)(
-          &vfs, buffer_name.c_str(), buffer.c_str(), buffer.size());
-      if (vfs_error) {
-        mj_deleteVFS(&vfs);
-        if (vfs_error == 2) {
-          throw py::value_error("Repeated file name in assets dict: " +
-                                buffer_name);
-        } else {
-          throw py::value_error("Asset failed to load: " + buffer_name);
-        }
-      }
-    }
-    auto m = mj_compile(ptr, &vfs);
-    if (!m || mjs_isWarning(ptr)) {
-      throw py::value_error(mjs_getError(ptr));
-    }
-    mj_deleteVFS(&vfs);
-    return m;
-  }
-
-  raw::MjSpec* ptr;
-  py::dict assets;
-  bool override_assets = true;
-  MjSpec* parent = nullptr;
-};
 
 template <typename LoadFunc>
 static raw::MjSpec* LoadSpecFileImpl(
@@ -261,22 +168,12 @@ py::list FindAllImpl(raw::MjsBody& body, mjtObj objtype, bool recursive) {
         // this should never happen
         throw pybind11::value_error(
             "body.find_all supports the types: body, frame, geom, site, "
-            "light, camera.");
+            "joint, light, camera.");
         break;
     }
     el = mjs_nextChild(&body, el, recursive);
   }
   return list;  // list of pointers, so they can be copied
-}
-
-void SetFrame(raw::MjsBody* body, mjtObj objtype, raw::MjsFrame* frame) {
-  mjsElement* el = mjs_firstChild(body, objtype, 0);
-  while (el) {
-    if (frame->element != el && mjs_getFrame(el) == nullptr) {
-      mjs_setFrame(el, frame);
-    }
-    el = mjs_nextChild(body, el, 0);
-  }
 }
 
 PYBIND11_MODULE(_specs, m) {
@@ -526,21 +423,9 @@ PYBIND11_MODULE(_specs, m) {
           throw pybind11::value_error(
               "Only one of frame or site can be specified.");
         }
-        auto worldbody = mjs_findBody(child.ptr, "world");
-        if (!worldbody) {
-          throw pybind11::value_error("Child does not have a world body.");
-        }
-        auto worldframe = mjs_addFrame(worldbody, nullptr);
-        SetFrame(worldbody, mjOBJ_BODY, worldframe);
-        SetFrame(worldbody, mjOBJ_SITE, worldframe);
-        SetFrame(worldbody, mjOBJ_FRAME, worldframe);
-        SetFrame(worldbody, mjOBJ_JOINT, worldframe);
-        SetFrame(worldbody, mjOBJ_GEOM, worldframe);
-        SetFrame(worldbody, mjOBJ_LIGHT, worldframe);
-        SetFrame(worldbody, mjOBJ_CAMERA, worldframe);
         const char* p = prefix.has_value() ? prefix.value().c_str() : "";
         const char* s = suffix.has_value() ? suffix.value().c_str() : "";
-        raw::MjsFrame* attached_frame = nullptr;
+        raw::MjsElement* attached_frame = nullptr;
         if (frame.has_value()) {
           raw::MjsFrame* frame_ptr = nullptr;
           try {
@@ -556,15 +441,11 @@ PYBIND11_MODULE(_specs, m) {
             throw pybind11::value_error(
                 "Frame spec does not match parent spec.");
           }
-          raw::MjsBody* parent_body = mjs_getParent(frame_ptr->element);
-          if (!parent_body) {
-            throw pybind11::value_error("Frame does not have a parent body.");
-          }
-          attached_frame = mjs_attachFrame(parent_body, worldframe, p, s);
+          attached_frame =
+              mjs_attach(frame_ptr->element, child.ptr->element, p, s);
           if (!attached_frame) {
             throw pybind11::value_error(mjs_getError(self.ptr));
           }
-          mjs_setFrame(attached_frame->element, frame_ptr);
         }
         if (site.has_value()) {
           raw::MjsSite* site_ptr = nullptr;
@@ -581,7 +462,8 @@ PYBIND11_MODULE(_specs, m) {
             throw pybind11::value_error(
                 "Site spec does not match parent spec.");
           }
-          attached_frame = mjs_attachFrameToSite(site_ptr, worldframe, p, s);
+          attached_frame =
+              mjs_attach(site_ptr->element, child.ptr->element, p, s);
           if (!attached_frame) {
             throw pybind11::value_error(mjs_getError(self.ptr));
           }
@@ -595,7 +477,7 @@ PYBIND11_MODULE(_specs, m) {
           self.assets[asset.first] = asset.second;
         }
         child.parent = &self;
-        return attached_frame;
+        return mjs_asFrame(attached_frame);
       },
       py::arg("child"), py::arg("prefix") = py::none(),
       py::arg("suffix") = py::none(), py::arg("site") = py::none(),
@@ -637,10 +519,11 @@ PYBIND11_MODULE(_specs, m) {
         return out;
       },
       py::return_value_policy::reference_internal);
-  mjsBody.def("set_frame",
-              [](raw::MjsBody& self, raw::MjsFrame& frame) -> void {
-                mjs_setFrame(self.element, &frame);
-              });
+  mjsBody.def("set_frame", [](raw::MjsBody& self, raw::MjsFrame& frame) {
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
+  });
   mjsBody.def_property(
       "classname",
       [](raw::MjsBody& self) -> raw::MjsDefault* {
@@ -826,11 +709,11 @@ PYBIND11_MODULE(_specs, m) {
          std::optional<std::string>& suffix) -> raw::MjsFrame* {
         const char* p = prefix.has_value() ? prefix.value().c_str() : "";
         const char* s = suffix.has_value() ? suffix.value().c_str() : "";
-        auto new_frame = mjs_attachFrame(&self, &frame, p, s);
+        auto new_frame = mjs_attach(self.element, frame.element, p, s);
         if (!new_frame) {
           throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
         }
-        return new_frame;
+        return mjs_asFrame(new_frame);
       },
       py::arg("frame"), py::arg("prefix") = py::none(),
       py::arg("suffix") = py::none(),
@@ -850,7 +733,9 @@ PYBIND11_MODULE(_specs, m) {
   // ============================= MJSFRAME ====================================
   mjsFrame.def("delete", [](raw::MjsFrame& self) { mjs_delete(self.element); });
   mjsFrame.def("set_frame", [](raw::MjsFrame& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsFrame.def_property_readonly(
       "parent",
@@ -865,12 +750,12 @@ PYBIND11_MODULE(_specs, m) {
          std::optional<std::string>& suffix) -> raw::MjsBody* {
         const char* p = prefix.has_value() ? prefix.value().c_str() : "";
         const char* s = suffix.has_value() ? suffix.value().c_str() : "";
-        auto new_body = mjs_attachBody(&self, &body, p, s);
+        auto new_body = mjs_attach(self.element, body.element, p, s);
         if (!new_body) {
           throw pybind11::value_error(
               mjs_getError(mjs_getSpec(self.element)));
         }
-        return new_body;
+        return mjs_asBody(new_body);
       },
       py::arg("body"), py::arg("prefix") = py::none(),
       py::arg("suffix") = py::none(),
@@ -879,7 +764,9 @@ PYBIND11_MODULE(_specs, m) {
   // ============================= MJSGEOM =====================================
   mjsGeom.def("delete", [](raw::MjsGeom& self) { mjs_delete(self.element); });
   mjsGeom.def("set_frame", [](raw::MjsGeom& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsGeom.def_property_readonly(
       "parent",
@@ -899,7 +786,9 @@ PYBIND11_MODULE(_specs, m) {
   // ============================= MJSJOINT ====================================
   mjsJoint.def("delete", [](raw::MjsJoint& self) { mjs_delete(self.element); });
   mjsJoint.def("set_frame", [](raw::MjsJoint& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsJoint.def_property_readonly(
       "parent",
@@ -919,7 +808,9 @@ PYBIND11_MODULE(_specs, m) {
   // ============================= MJSSITE =====================================
   mjsSite.def("delete", [](raw::MjsSite& self) { mjs_delete(self.element); });
   mjsSite.def("set_frame", [](raw::MjsSite& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsSite.def_property_readonly(
       "parent",
@@ -942,12 +833,12 @@ PYBIND11_MODULE(_specs, m) {
          std::optional<std::string>& suffix) -> raw::MjsBody* {
         const char* p = prefix.has_value() ? prefix.value().c_str() : "";
         const char* s = suffix.has_value() ? suffix.value().c_str() : "";
-        auto new_body = mjs_attachToSite(&self, &body, p, s);
+        auto new_body = mjs_attach(self.element, body.element, p, s);
         if (!new_body) {
           throw pybind11::value_error(
               mjs_getError(mjs_getSpec(self.element)));
         }
-        return new_body;
+        return mjs_asBody(new_body);
       },
       py::arg("body"), py::arg("prefix") = py::none(),
       py::arg("suffix") = py::none(),
@@ -957,7 +848,9 @@ PYBIND11_MODULE(_specs, m) {
   mjsCamera.def("delete",
                 [](raw::MjsCamera& self) { mjs_delete(self.element); });
   mjsCamera.def("set_frame", [](raw::MjsCamera& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsCamera.def_property_readonly(
       "parent",
@@ -977,7 +870,9 @@ PYBIND11_MODULE(_specs, m) {
   // ============================= MJSLIGHT ====================================
   mjsLight.def("delete", [](raw::MjsLight& self) { mjs_delete(self.element); });
   mjsLight.def("set_frame", [](raw::MjsLight& self, raw::MjsFrame& frame) {
-    mjs_setFrame(self.element, &frame);
+    if (mjs_setFrame(self.element, &frame) != 0) {
+      throw pybind11::value_error(mjs_getError(mjs_getSpec(self.element)));
+    }
   });
   mjsLight.def_property_readonly(
       "parent",

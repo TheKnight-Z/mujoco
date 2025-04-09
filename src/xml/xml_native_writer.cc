@@ -725,10 +725,13 @@ void mjXWriter::OneTendon(XMLElement* elem, const mjCTendon* tendon, mjCDef* def
   WriteAttr(elem, "solimpfriction", mjNIMP, tendon->solimp_friction, def->Tendon().solimp_friction,
             true);
   WriteAttrKey(elem, "limited", TFAuto_map, 3, tendon->limited, def->Tendon().limited);
+  WriteAttrKey(elem, "actuatorfrclimited", TFAuto_map, 3, tendon->actfrclimited, def->Tendon().actfrclimited);
   WriteAttr(elem, "range", 2, tendon->range, def->Tendon().range);
+  WriteAttr(elem, "actuatorfrcrange", 2, tendon->actfrcrange, def->Tendon().actfrcrange);
   WriteAttr(elem, "margin", 1, &tendon->margin, &def->Tendon().margin);
   WriteAttr(elem, "stiffness", 1, &tendon->stiffness, &def->Tendon().stiffness);
   WriteAttr(elem, "damping", 1, &tendon->damping, &def->Tendon().damping);
+  WriteAttr(elem, "armature", 1, &tendon->armature, &def->Tendon().armature);
   WriteAttr(elem, "frictionloss", 1, &tendon->frictionloss, &def->Tendon().frictionloss);
   if (tendon->springlength[0] != tendon->springlength[1] ||
       def->Tendon().springlength[0] != def->Tendon().springlength[1]) {
@@ -1632,7 +1635,8 @@ void mjXWriter::Body(XMLElement* elem, mjCBody* body, mjCFrame* frame, string_vi
     WriteVector(elem, "user", body->get_userdata());
 
     // write inertial
-    if (body->explicitinertial && model->compiler.inertiafromgeom != mjINERTIAFROMGEOM_TRUE) {
+    if (model->compiler.saveinertial ||
+        (body->explicitinertial && model->compiler.inertiafromgeom != mjINERTIAFROMGEOM_TRUE)) {
       XMLElement* inertial = InsertEnd(elem, "inertial");
       WriteAttr(inertial, "pos", 3, body->ipos);
       WriteAttr(inertial, "quat", 4, body->iquat, unitq);
@@ -2030,6 +2034,10 @@ void mjXWriter::Sensor(XMLElement* root) {
       case mjSENS_JOINTACTFRC:
         elem = InsertEnd(section, "jointactuatorfrc");
         WriteAttrTxt(elem, "joint", sensor->get_objname());
+        break;
+      case mjSENS_TENDONACTFRC:
+        elem = InsertEnd(section, "tendonactuatorfrc");
+        WriteAttrTxt(elem, "tendon", sensor->get_objname());
         break;
 
       // sensors related to ball joints
