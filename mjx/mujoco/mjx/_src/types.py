@@ -763,14 +763,17 @@ class Model(PyTreeNode):
     tendon_adr: address of first object in tendon's path      (ntendon,)
     tendon_num: number of objects in tendon's path            (ntendon,)
     tendon_limited: does tendon have length limits            (ntendon,)
+    tendon_actfrclimited: tendon has actuator force limits    (ntendon,)
     tendon_solref_lim: constraint solver reference: limit     (ntendon, mjNREF)
     tendon_solimp_lim: constraint solver impedance: limit     (ntendon, mjNIMP)
     tendon_solref_fri: constraint solver reference: friction  (ntendon, mjNREF)
     tendon_solimp_fri: constraint solver impedance: friction  (ntendon, mjNIMP)
     tendon_range: tendon length limits                        (ntendon, 2)
+    tendon_actfrcrange: tendon actuator force limits          (ntendon, 2)
     tendon_margin: min distance for limit detection           (ntendon,)
     tendon_stiffness: stiffness coefficient                   (ntendon,)
     tendon_damping: damping coefficient                       (ntendon,)
+    tendon_armature: inertia associated with tendon velocity  (ntendon,)
     tendon_frictionloss: loss due to friction                 (ntendon,)
     tendon_lengthspring: spring resting length range          (ntendon, 2)
     tendon_length0: tendon length in qpos0                    (ntendon,)
@@ -844,6 +847,7 @@ class Model(PyTreeNode):
     name_tupleadr: tuple name pointers                        (ntuple,)
     name_keyadr: keyframe name pointers                       (nkey,)
     names: names of all objects, 0-terminated                 (nnames,)
+    signature: compilation signature
   """
 
   nq: int
@@ -1104,14 +1108,17 @@ class Model(PyTreeNode):
   tendon_adr: np.ndarray
   tendon_num: np.ndarray
   tendon_limited: np.ndarray
+  tendon_actfrclimited: np.ndarray
   tendon_solref_lim: jax.Array
   tendon_solimp_lim: jax.Array
   tendon_solref_fri: jax.Array
   tendon_solimp_fri: jax.Array
   tendon_range: jax.Array
+  tendon_actfrcrange: jax.Array
   tendon_margin: jax.Array
   tendon_stiffness: jax.Array
   tendon_damping: jax.Array
+  tendon_armature: jax.Array
   tendon_frictionloss: jax.Array
   tendon_lengthspring: jax.Array
   tendon_length0: jax.Array
@@ -1187,6 +1194,7 @@ class Model(PyTreeNode):
   name_tupleadr: np.ndarray
   name_keyadr: np.ndarray
   names: bytes
+  signature: np.uint64
   _sizes: jax.Array
 
 

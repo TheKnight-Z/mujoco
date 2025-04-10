@@ -140,7 +140,7 @@ findorfetch(
   GIT_REPO
   https://github.com/abseil/abseil-cpp
   GIT_TAG
-  9ac7062b1860d895fb5a8cbf58c3e9ef8f674b5f # LTS 20250127.0
+  d9e4955c65cd4367dd6bf46f4ccb8cd3d100540b # LTS 20250127.1
   TARGETS
   ${MUJOCO_PYTHON_ABSL_TARGETS}
   EXCLUDE_FROM_ALL
@@ -173,7 +173,7 @@ findorfetch(
   GIT_REPO
   https://gitlab.com/libeigen/eigen
   GIT_TAG
-  66f7f51b7e069d0a03a21157fa60b24aece69aeb
+  464c1d097891a1462ab28bf8bb763c1683883892
   TARGETS
   Eigen3::Eigen
   EXCLUDE_FROM_ALL
@@ -277,6 +277,25 @@ target_link_libraries(
             mujoco
             raw
 )
+
+add_library(structs_wrappers STATIC
+  structs_wrappers.cc
+  serialization.h
+  indexers.cc
+)
+target_include_directories(structs_wrappers PRIVATE ${Python3_INCLUDE_DIRS})
+target_link_libraries(
+  structs_wrappers
+  PRIVATE absl::flat_hash_map
+          absl::span
+          crossplatform
+          mujoco
+          raw
+          structs_header
+          pybind11::headers
+          Eigen3::Eigen
+)
+
 
 add_library(functions_header INTERFACE)
 target_sources(functions_header INTERFACE functions.h)
@@ -403,6 +422,7 @@ target_link_libraries(
           func_wrap
           function_traits
           structs_header
+          structs_wrappers
 )
 
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/specs.cc.inc)
@@ -417,6 +437,8 @@ endif()
 mujoco_pybind11_module(
   _specs
   specs.cc
+  specs_wrapper.h
+  specs_wrapper.cc
   specs.cc.inc
 )
 target_link_libraries(

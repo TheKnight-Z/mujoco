@@ -219,7 +219,6 @@ class mjCBoundingVolumeHierarchy : public mjCBoundingVolumeHierarchy_ {
 class mjCBase_ : public mjsElement {
  public:
   int id;                 // object id
-  int uid;                // unique identifier
   std::string name;       // object name
   std::string classname;  // defaults class name
   std::string info;       // error message info set by the user
@@ -253,6 +252,9 @@ class mjCBase : public mjCBase_ {
 
   // Copy plugins instantiated in this object
   virtual void CopyPlugin() {}
+
+  // Returns parent of this object
+  virtual mjCBase* GetParent() const { return nullptr; }
 
   // Copy assignment
   mjCBase& operator=(const mjCBase& other);
@@ -1521,6 +1523,7 @@ class mjCTendon : public mjCTendon_, private mjsTendon {
   void SetModel(mjCModel* _model);
 
   bool is_limited() const;
+  bool is_actfrclimited() const;
 
  private:
   void Compile(void);                         // compiler

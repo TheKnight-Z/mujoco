@@ -23,6 +23,7 @@
 #include <optional>
 #include <ratio>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -144,7 +145,8 @@ class Simulate {
     std::optional<std::string> print_data;
     bool reset;
     bool align;
-    bool copy_pose;
+    bool copy_key;
+    bool copy_key_full_precision;
     bool load_from_history;
     bool load_key;
     bool save_key;
@@ -249,10 +251,12 @@ class Simulate {
   mjvFigure figsize = {};
   mjvFigure figsensor = {};
 
-  // additional user-defined visualization geoms (used in passive mode)
+  // additional user-defined visualization
   mjvScene* user_scn = nullptr;
   mjtByte user_scn_flags_prev_[mjNRNDFLAG];
   std::vector<std::pair<mjrRect, mjvFigure>> user_figures_;
+  std::vector<std::tuple<int, int, std::string, std::string>> user_texts_;
+  std::vector<std::tuple<mjrRect, unsigned char*>> user_images_;
 
   // OpenGL rendering and UI
   int refresh_rate = 60;
@@ -293,7 +297,7 @@ class Simulate {
     {mjITEM_BUTTON,    "Reset",         2, nullptr,              " #259"},
     {mjITEM_BUTTON,    "Reload",        5, nullptr,              "CL"},
     {mjITEM_BUTTON,    "Align",         2, nullptr,              "CA"},
-    {mjITEM_BUTTON,    "Copy pose",     2, nullptr,              "CC"},
+    {mjITEM_BUTTON,    "Copy state",    2, nullptr,              "CC"},
     {mjITEM_SLIDERINT, "Key",           3, &this->key,           "0 0"},
     {mjITEM_BUTTON,    "Load key",      3},
     {mjITEM_BUTTON,    "Save key",      3},

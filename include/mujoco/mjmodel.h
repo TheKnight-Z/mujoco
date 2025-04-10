@@ -269,7 +269,8 @@ typedef enum mjtObj_ {            // type of MujoCo object
 
   // meta elements, do not appear in mjModel
   mjOBJ_FRAME         = 100,      // frame
-  mjOBJ_DEFAULT                   // default
+  mjOBJ_DEFAULT,                  // default
+  mjOBJ_MODEL                     // entire model
 
 } mjtObj;
 
@@ -316,6 +317,7 @@ typedef enum mjtSensor_ {         // type of sensor
   mjSENS_ACTUATORVEL,             // scalar actuator velocity
   mjSENS_ACTUATORFRC,             // scalar actuator force
   mjSENS_JOINTACTFRC,             // scalar actuator force, measured at the joint
+  mjSENS_TENDONACTFRC,            // scalar actuator force, measured at the tendon
 
   // sensors related to ball joints
   mjSENS_BALLQUAT,                // 4D ball joint quaternion
@@ -611,7 +613,7 @@ struct mjModel_ {
   int ncam;                       // number of cameras
   int nlight;                     // number of lights
   int nflex;                      // number of flexes
-  int nflexnode;                   // number of dofs in all flexes
+  int nflexnode;                  // number of dofs in all flexes
   int nflexvert;                  // number of vertices in all flexes
   int nflexedge;                  // number of edges in all flexes
   int nflexelem;                  // number of elements in all flexes
@@ -1030,15 +1032,18 @@ struct mjModel_ {
   int*      tendon_matid;         // material id for rendering                (ntendon x 1)
   int*      tendon_group;         // group for visibility                     (ntendon x 1)
   mjtByte*  tendon_limited;       // does tendon have length limits           (ntendon x 1)
+  mjtByte*  tendon_actfrclimited; // does tendon have actuator force limits   (ntendon x 1)
   mjtNum*   tendon_width;         // width for rendering                      (ntendon x 1)
   mjtNum*   tendon_solref_lim;    // constraint solver reference: limit       (ntendon x mjNREF)
   mjtNum*   tendon_solimp_lim;    // constraint solver impedance: limit       (ntendon x mjNIMP)
   mjtNum*   tendon_solref_fri;    // constraint solver reference: friction    (ntendon x mjNREF)
   mjtNum*   tendon_solimp_fri;    // constraint solver impedance: friction    (ntendon x mjNIMP)
   mjtNum*   tendon_range;         // tendon length limits                     (ntendon x 2)
+  mjtNum*   tendon_actfrcrange;   // range of total actuator force            (ntendon x 2)
   mjtNum*   tendon_margin;        // min distance for limit detection         (ntendon x 1)
   mjtNum*   tendon_stiffness;     // stiffness coefficient                    (ntendon x 1)
   mjtNum*   tendon_damping;       // damping coefficient                      (ntendon x 1)
+  mjtNum*   tendon_armature;      // inertia associated with tendon velocity  (ntendon x 1)
   mjtNum*   tendon_frictionloss;  // loss due to friction                     (ntendon x 1)
   mjtNum*   tendon_lengthspring;  // spring resting length range              (ntendon x 2)
   mjtNum*   tendon_length0;       // tendon length in qpos0                   (ntendon x 1)
