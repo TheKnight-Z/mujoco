@@ -31,7 +31,7 @@ from replay_buffer import ReplayBufferSuper
 from brax.base import Motion, Transform
 
 import mujoco.mjx as mjx
-
+import wandb
 InferenceParams = Tuple[running_statistics.NestedMeanStd, Params]
 Metrics = types.Metrics
 
@@ -112,7 +112,8 @@ def compute_tracking_loss_from_state(pred_state: jnp.ndarray, target_state: jnp.
     _mse_pos = f(pred_pos, target_pos) * 1000
     _mse_rot = f(quaternion_to_rotation_6d(pred_quat), quaternion_to_rotation_6d(target_quat)) * 1000
     _mse_vel = f(pred_vel, target_vel) * 1/50 * 1000
-    _mse_ang = f(pred_ang, target_ang) * 1/50 * 10
+    _mse_ang = 0
+    # _mse_ang = f(pred_ang, target_ang) * 1/50 * 10
     
     # jax.debug.print('mse_pos:{}', _mse_pos)
     # jax.debug.print('mse_rot:{}', _mse_rot)
@@ -875,7 +876,7 @@ def superdyno_train(
         # # filtered_transition_data = transition_data
         # # filtered_transition_data = {k: mask_fn(v) for k, v in transition_data.items()}
         # buffer.add_traj(filtered_transition_data)
-            
+        # env_state = env.reset(rng)
         # 3. sample (state, actions, next_state) from buffer to train the world model
         metrics = {
             'world_training_loss': 0.0,
@@ -1027,6 +1028,8 @@ def superdyno_train(
             key,
         )
         
+        # state_h.pipeline_state.qpos: (1, 64, 19)
+        # breakpoint()
         
         # shape of transition_data
         # state: [T, B, 169]
@@ -1073,6 +1076,11 @@ def superdyno_train(
         # filtered_transition_data = transition_data
         # filtered_transition_data = {k: mask_fn(v) for k, v in transition_data.items()}
         buffer.add_traj(filtered_transition_data)
+        # breakpoint()
+        # # reset all the environments (I don't know how to only reset some processes)
+        # state_h = env.reset(rng)
+        # --------------------------------#
+        # breakpoint()
         env_state = state_h
         # breakpoint()
         training_policy_state_next = TrainingState(
@@ -1093,11 +1101,11 @@ def superdyno_train(
             training_world_state,
             training_policy_state,
             metrics,
-            key,
+            key
         ) = training_epoch(
             training_world_state, training_policy_state, env_state, key
         )
-        
+        # env_state = env.reset(rng)
         metrics = jax.tree_util.tree_map(jnp.mean, metrics)
         jax.tree_util.tree_map(lambda x: x.block_until_ready(), metrics)
 
@@ -1112,6 +1120,7 @@ def superdyno_train(
         }
         print(f"world_training_loss:{metrics['training/world_training_loss']}, world_pos_loss:{metrics['training/world_pos_loss']}, world_rot_loss:{metrics['training/world_rot_loss']}, world_vel_loss:{metrics['training/world_vel_loss']}, world_ang_loss:{metrics['training/world_ang_loss']}")
         print(f"policy_training_loss:{metrics['training/policy_training_loss']}, policy_pos_loss:{metrics['training/policy_pos_loss']}, policy_rot_loss:{metrics['training/policy_rot_loss']}, policy_vel_loss:{metrics['training/policy_vel_loss']}, policy_ang_loss:{metrics['training/policy_ang_loss']}")
+        
         return training_world_state, training_policy_state, env_state, metrics, key  # pytype: disable=bad-return-type  # py311-upgrade
 
     ##### Initialize world / policy networks and training states #######
@@ -1210,6 +1219,9 @@ def superdyno_train(
             (training_world_state, training_policy_state, env_state, training_metrics, epoch_key) = (
                 training_epoch_with_timing(training_world_state, training_policy_state, env_state, epoch_key)
             )
+            
+            if not wandb.run is None:
+                wandb.log(training_metrics, step= int(it * updates_per_epoch_policy + sub_iter))
         
         if process_id == 0:
             # Run evals.

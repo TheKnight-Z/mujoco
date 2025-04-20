@@ -44,6 +44,8 @@ import imageio
 
 from superdyno_train import superdyno_train, extract_and_concat_state_info, make_neural_world_models, rotate_vec_batch, _get_self_obs
 from superdyno_train_onedevice import superdyno_train_onedevice
+
+import wandb
 # Load in the model
 xml_path = epath.Path('mujoco_menagerie/anybotics_anymal_c/scene_mjx.xml').as_posix()
 
@@ -83,12 +85,12 @@ def render_rollout(reset_fn, step_fn,
     for i in range(n_steps):
         act_rng, rng = jax.random.split(rng)
         ctrl, _ = inference_fn(state.obs, act_rng)
-        state = step_fn(state, ctrl)
+        state, ref_state, done, ref_qpos = step_fn(state, ctrl)
         if i % render_every == 0:
             rollout.append(state.pipeline_state)
 
     save_video(env.render(rollout, camera=camera),
-               filename=filename, fps=1.0 / (env.dt*render_every))
+               filename=filename, fps=1.0 / float(env.dt*render_every))
     
     # media.show_video(env.render(rollout, camera=camera), 
     #                  fps=1.0 / (env.dt*render_every),
@@ -333,6 +335,8 @@ class TrotAnymal(PipelineEnv):
     done = jp.where(x.pos[0, 2] < self.termination_height, 1.0, done)
     up = jp.array([0.0, 0.0, 1.0])
     done = jp.where(jp.dot(math.rotate(up, x.rot[0]), up) < 0, 1.0, done)
+    error = (((x.pos - ref_x.pos) ** 2).sum(-1)**0.5).mean()
+    done = jp.where(error > self.err_threshold, 1.0, done)
 
     # reward
     reward_tuple = {
@@ -368,11 +372,11 @@ class TrotAnymal(PipelineEnv):
     # error = (((x.pos - ref_x.pos) ** 2).sum(-1)**0.5).mean()
     # to_reference = jp.where(error > self.err_threshold, 1.0, 0.0)
 
-    # to_reference = jp.array(to_reference, dtype=int) # keeps output types same as input. 
-    # ref_data = self.mjx_to_brax(ref_data)
+    to_reference = jp.array(done, dtype=int) # keeps output types same as input. 
+    ref_data = self.mjx_to_brax(ref_data)
 
-    # data = jax.tree_util.tree_map(lambda x, y: 
-    #                               jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, ref_data)
+    data = jax.tree_util.tree_map(lambda x, y: 
+                                  jp.array((1-to_reference)*x + to_reference*y, x.dtype), data, ref_data)
     
     x, xd = data.x, data.xd # Data may have changed.
     obs = self._get_obs(data.qpos, x, xd, state.info)
@@ -479,7 +483,8 @@ make_world_factory = functools.partial(
   hidden_layer_sizes=(256,128)
 )
 
-epochs = 499
+epochs = 99
+# epochs = 1
 
 train_fn = functools.partial(superdyno_train,
                              episode_length=240,
@@ -494,7 +499,8 @@ train_fn = functools.partial(superdyno_train,
                              learning_rate_policy=1e-5,
                              learning_rate_world=5e-4,
                              num_eval_envs=64,
-                             num_evals=10 + 1,
+                            #  num_evals=10 + 1,
+                             num_evals = 2,
                              use_float64=True,
                              normalize_observations=True,
                              policy_network_factory=make_networks_factory,
@@ -512,6 +518,17 @@ def progress(it, metrics):
   ydataerr.append(metrics['eval/episode_reward_std'])
   print(f"Step {it} - "
         f"Reward: {metrics['eval/episode_reward']:.2f} +/- {metrics['eval/episode_reward_std']:.2f} - ")
+
+# Log the data into wandb
+wandb.init(
+    project="SuperDyna_MJX",
+    resume=False,
+    id=None,
+    notes="Default Notes",
+)
+exp_name = "output_trot_superdyno_debug_99_reset_noangloss"
+wandb.run.name = exp_name
+wandb.run.save()
 
 # Each foot contacts the ground twice/sec.
 env = envs.get_environment("trotting_anymal", step_k = 13)
@@ -535,7 +552,7 @@ render_rollout(
   jax.jit(demo_env.step),
   jax.jit(make_inference_fn(policy_params)),
   demo_env,
-  filename='output_trot_superdyno_debug.mp4',
+  filename=exp_name + '.mp4',
   n_steps=200,
   seed=1
 )
